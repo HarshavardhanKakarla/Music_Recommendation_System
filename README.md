@@ -17,6 +17,9 @@ To get started with the Music Recommendation System, follow these steps:
 
 3. Install the required dependencies:pip install  
 
+4. Replace CLIENT_ID and CLIENT_SECRET with your credentials from spotify for developers(web api)
+
+5. Run the web app with the command: streamlit run file_name.
 
 
 ## License
