@@ -3,7 +3,7 @@ import streamlit as st
 import spotipy
 from spotipy.oauth2 import SpotifyClientCredentials
 
-CLIENT_ID = "6cc4af4a1994402998d071ad18a7886"
+CLIENT_ID = "6cc4af4a1994402998d071ad18a78868"
 CLIENT_SECRET = "ee1d74f49a15403c90b155dc07c7f906"
 
 # Initialize the Spotify client
@@ -27,7 +27,7 @@ def recommend(song):
     distances = sorted(list(enumerate(similarity[index])), reverse=True, key=lambda x: x[1])
     recommended_music_names = []
     recommended_music_posters = []
-    for i in distances[1:6]:
+    for i in distances[1:7]:
         # fetch the movie poster
         artist = music.iloc[i[0]].artist
         print(artist)
@@ -37,26 +37,25 @@ def recommend(song):
 
     return recommended_music_names,recommended_music_posters
 
-st.header('Music Recommender System')
-music = pickle.load(open('df.pkl','rb'))
-similarity = pickle.load(open('similarity.pkl','rb'))
+st.header('Music Recommendation System')
+music = pickle.load(open('D:\ASUS\Programming\Python\Web\Music_Recommendation_System\df.pkl','rb'))
+similarity = pickle.load(open('D:\ASUS\Programming\Python\Web\Music_Recommendation_System\similarity.pkl','rb'))
 
 music_list = music['song'].values
 selected_movie = st.selectbox(
-    "Type or select a song from the dropdown",
+    "Type or select a song of your choice from the dropdown",
     music_list
 )
 
 if st.button('Show Recommendation'):
     recommended_music_names,recommended_music_posters = recommend(selected_movie)
-    col1, col2, col3, col4, col5= st.columns(5)
+    col1, col2, col3, col4, col5, col6= st.columns(6)
     with col1:
         st.text(recommended_music_names[0])
         st.image(recommended_music_posters[0])
     with col2:
         st.text(recommended_music_names[1])
         st.image(recommended_music_posters[1])
-
     with col3:
         st.text(recommended_music_names[2])
         st.image(recommended_music_posters[2])
@@ -66,6 +65,9 @@ if st.button('Show Recommendation'):
     with col5:
         st.text(recommended_music_names[4])
         st.image(recommended_music_posters[4])
+    with col6:
+        st.text(recommended_music_names[5])
+        st.image(recommended_music_posters[5])
 
 
 
