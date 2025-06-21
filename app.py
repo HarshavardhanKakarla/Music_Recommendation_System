@@ -1,26 +1,46 @@
+import os
 import pickle
+import gzip
 import streamlit as st
 import spotipy
 from spotipy.oauth2 import SpotifyClientCredentials
 
-# Retrieve Spotify credentials from Streamlit secrets
+# --- CONFIGURATION ---
+
+# Google Drive File ID for similarity.pkl.gz (replace with your actual file ID)
+SIMILARITY_FILE_ID = "1HtjpXIJC950AKuaDHZwTux54SU63CZGm"  # <-- Replace this
+
+# Filename to save after download
+SIMILARITY_FILENAME = "similarity.pkl.gz"
+
+# Spotify API credentials (from Streamlit secrets)
 CLIENT_ID = st.secrets["SPOTIFY_CLIENT_ID"]
 CLIENT_SECRET = st.secrets["SPOTIFY_CLIENT_SECRET"]
 
-# Initialize the Spotify client
-client_credentials_manager = SpotifyClientCredentials(client_id=CLIENT_ID, client_secret=CLIENT_SECRET)
-sp = spotipy.Spotify(client_credentials_manager=client_credentials_manager)
+# --- FUNCTIONS ---
+
+def download_similarity():
+    """Download similarity.pkl.gz from Google Drive if not present."""
+    if not os.path.exists(SIMILARITY_FILENAME):
+        import gdown
+        url = f"https://drive.google.com/uc?id={SIMILARITY_FILE_ID}"
+        st.info("Downloading similarity matrix. Please wait...")
+        gdown.download(url, SIMILARITY_FILENAME, quiet=False)
+    return SIMILARITY_FILENAME
 
 @st.cache_data(show_spinner=False)
 def load_data():
-    # Use relative paths for deployment
+    """Load music DataFrame and similarity matrix."""
+    # Load music DataFrame (assume df.pkl is in repo)
     with open("df.pkl", "rb") as f:
         music = pickle.load(f)
-    with open("similarity.pkl", "rb") as f:
+    # Download and load similarity matrix
+    sim_file = download_similarity()
+    with gzip.open(sim_file, "rb") as f:
         similarity = pickle.load(f)
     return music, similarity
 
-def get_song_album_cover_url(song_name, artist_name):
+def get_song_album_cover_url(song_name, artist_name, sp):
     search_query = f"track:{song_name} artist:{artist_name}"
     try:
         results = sp.search(q=search_query, type="track", limit=1)
@@ -33,7 +53,7 @@ def get_song_album_cover_url(song_name, artist_name):
     # Fallback image
     return "https://i.postimg.cc/0QNxYz4V/social.png"
 
-def recommend(song, music, similarity):
+def recommend(song, music, similarity, sp):
     try:
         index = music[music['song'] == song].index[0]
     except IndexError:
@@ -45,12 +65,19 @@ def recommend(song, music, similarity):
     for i in distances[1:7]:
         artist = music.iloc[i[0]].artist
         song_name = music.iloc[i[0]].song
-        recommended_music_posters.append(get_song_album_cover_url(song_name, artist))
+        recommended_music_posters.append(get_song_album_cover_url(song_name, artist, sp))
         recommended_music_names.append(song_name)
     return recommended_music_names, recommended_music_posters
 
-st.header('Music Recommendation System')
+# --- MAIN APP ---
 
+st.header('🎵 Music Recommendation System')
+
+# Initialize Spotify API client
+client_credentials_manager = SpotifyClientCredentials(client_id=CLIENT_ID, client_secret=CLIENT_SECRET)
+sp = spotipy.Spotify(client_credentials_manager=client_credentials_manager)
+
+# Load data
 music, similarity = load_data()
 music_list = music['song'].values
 
@@ -60,7 +87,7 @@ selected_song = st.selectbox(
 )
 
 if st.button('Show Recommendation'):
-    recommended_music_names, recommended_music_posters = recommend(selected_song, music, similarity)
+    recommended_music_names, recommended_music_posters = recommend(selected_song, music, similarity, sp)
     if recommended_music_names:
         cols = st.columns(6)
         for idx in range(len(recommended_music_names)):
