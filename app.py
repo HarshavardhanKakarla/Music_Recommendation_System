@@ -222,11 +222,10 @@ def main():
 
     # Sidebar metrics
     st.sidebar.metric("Total songs", f"{len(df):,}")
-    st.sidebar.metric("Unique artists", f"{df['artist'].nunique():,}")
-
+    
     # Main selector
     selection = st.selectbox(
-        "Type or pick a song:",
+        "Type or Pick a song:",
         df["song"].values,
         help="Start typing to search"
     )
