@@ -1,334 +1,241 @@
 import os
 import pickle
 import gzip
+import time
 import streamlit as st
 import spotipy
 from spotipy.oauth2 import SpotifyClientCredentials
-import time
 
-# --- CONFIGURATION ---
+# ──────────────────────────────────────────────────────────────
+# CONFIGURATION
+# ──────────────────────────────────────────────────────────────
 
-# Google Drive File ID for similarity.pkl.gz (replace with your actual file ID)
-SIMILARITY_FILE_ID = "1HtjpXIJC950AKuaDHZwTux54SU63CZGm"  # <-- Replace this
+# Google Drive file ID for the compressed similarity matrix
+SIMILARITY_FILE_ID = "1HtjpXIJC950AKuaDHZwTux54SU63CZGm"
 
-# Filename to save after download
+# Local filename after download
 SIMILARITY_FILENAME = "similarity.pkl.gz"
 
-# Fallback image for album covers
+# Fallback album-cover image
 FALLBACK_IMAGE = "https://i.postimg.cc/0QNxYz4V/social.png"
 
-# --- SPOTIFY CLIENT SETUP ---
-
+# ──────────────────────────────────────────────────────────────
+# SPOTIFY CLIENT INITIALIZATION
+# ──────────────────────────────────────────────────────────────
 @st.cache_resource
 def get_spotify_client():
-    """Initialize and cache Spotify client with proper error handling."""
-    try:
-        # Try to get from Streamlit secrets first (deployment)
-        client_id = st.secrets.get("SPOTIFY_CLIENT_ID") or st.secrets.get("CLIENT_ID")
-        client_secret = st.secrets.get("SPOTIFY_CLIENT_SECRET") or st.secrets.get("CLIENT_SECRET")
-    except:
-        # Fallback to environment variables (local development)
-        client_id = os.getenv("SPOTIFY_CLIENT_ID") or os.getenv("CLIENT_ID")
-        client_secret = os.getenv("SPOTIFY_CLIENT_SECRET") or os.getenv("CLIENT_SECRET")
-    
+    """Return a cached Spotify client or stop the app with instructions."""
+    # Look for credentials in Streamlit secrets (first priority)
+    client_id = st.secrets.get("SPOTIFY_CLIENT_ID")
+    client_secret = st.secrets.get("SPOTIFY_CLIENT_SECRET")
+
+    # Fallback to environment variables (local development)
     if not client_id or not client_secret:
-        st.error("""
-        **Spotify API credentials not found!**
-        
-        **For Streamlit Cloud deployment:**
-        1. Go to your app settings → Advanced settings
-        2. Add your secrets:
-           ```
-           SPOTIFY_CLIENT_ID = "your_client_id_here"
-           SPOTIFY_CLIENT_SECRET = "your_client_secret_here"
-           ```
-        
-        **Get credentials from:** https://developer.spotify.com/dashboard/
-        """)
+        client_id = os.getenv("SPOTIFY_CLIENT_ID")
+        client_secret = os.getenv("SPOTIFY_CLIENT_SECRET")
+
+    # Abort if still missing
+    if not client_id or not client_secret:
+        st.error(
+            "🚨 **Spotify API credentials not found!**\n\n"
+            "Add them in **Advanced settings → Secrets** when you deploy,\n"
+            "or set the environment variables `SPOTIFY_CLIENT_ID` and "
+            "`SPOTIFY_CLIENT_SECRET` when running locally.\n\n"
+            "Get credentials at: https://developer.spotify.com/dashboard/"
+        )
         st.stop()
-    
+
+    # Create client & validate
     try:
-        client_credentials_manager = SpotifyClientCredentials(
+        credentials = SpotifyClientCredentials(
             client_id=client_id,
             client_secret=client_secret
         )
-        sp = spotipy.Spotify(client_credentials_manager=client_credentials_manager)
-        
-        # Test the connection
-        sp.search(q='test', type='track', limit=1)
+        sp = spotipy.Spotify(client_credentials_manager=credentials)
+        # Simple connectivity test
+        sp.search(q="test", type="track", limit=1)
         return sp
-    except Exception as e:
-        st.error(f"Failed to connect to Spotify API: {str(e)}")
-        st.info("Please check your Spotify API credentials and try again.")
+    except Exception as exc:
+        st.error(f"Could not connect to Spotify API: {exc}")
         st.stop()
 
-# --- FILE HANDLING FUNCTIONS ---
+# ──────────────────────────────────────────────────────────────
+# FILE HANDLING
+# ──────────────────────────────────────────────────────────────
+def download_file_with_progress(file_id: str, dest: str):
+    """Download a large file from Google Drive with visible progress."""
+    if os.path.exists(dest):
+        return dest
 
-def download_similarity_with_progress():
-    """Download similarity.pkl.gz from Google Drive with progress indicator."""
-    if os.path.exists(SIMILARITY_FILENAME):
-        return SIMILARITY_FILENAME
-    
     try:
         import gdown
-        
-        # Show download progress
-        progress_container = st.empty()
-        status_container = st.empty()
-        
-        with progress_container.container():
-            st.info("Downloading similarity matrix from Google Drive...")
-            progress_bar = st.progress(0)
-            status_text = st.empty()
-            
-        url = f"https://drive.google.com/uc?id={SIMILARITY_FILE_ID}"
-        
-        # Download with timeout
-        try:
-            with status_text.container():
-                st.text("Downloading... This may take a few minutes")
-            
-            gdown.download(url, SIMILARITY_FILENAME, quiet=False)
-            progress_bar.progress(100)
-            
-            with status_text.container():
-                st.success("Download completed!")
-                
-        except Exception as download_error:
-            st.error(f"Download failed: {str(download_error)}")
-            st.info("Troubleshooting tips:**\n- Check your internet connection\n- Verify the Google Drive file ID is correct\n- Ensure the file is publicly accessible")
-            st.stop()
-            
-        # Clear progress indicators
-        time.sleep(1)
-        progress_container.empty()
-        status_container.empty()
-      except ImportError:
-        st.error("❌ 'gdown' library not found. Please add 'gdown>=4.7.1' to requirements.txt")
-        st.stop()  
-    
-    return SIMILARITY_FILENAME
+    except ImportError:
+        st.error(
+            "The `gdown` package is required to download data from Google "
+            "Drive. Add `gdown>=4.7.1` to your requirements.txt."
+        )
+        st.stop()
+
+    url = f"https://drive.google.com/uc?id={file_id}"
+    prog_bar = st.progress(0)
+    status = st.empty()
+
+    try:
+        with status.container():
+            st.info("Downloading similarity matrix ... (this may take a while)")
+        gdown.download(url, dest, quiet=False)
+        prog_bar.progress(100)
+        status.success("Download completed!")
+    except Exception as err:
+        status.error(f"Download failed: {err}")
+        st.stop()
+    finally:
+        time.sleep(0.5)
+        prog_bar.empty()
+        status.empty()
+
+    return dest
 
 @st.cache_data(show_spinner=False)
 def load_music_dataframe():
-    """Load music DataFrame with error handling."""
-    try:
-        if not os.path.exists("df.pkl"):
-            st.error("""
-            **Music dataset not found!**
-            
-            The file 'df.pkl' is missing from your repository.
-            
-            **To fix this:**
-            1. Ensure 'df.pkl' is in your GitHub repository
-            2. Check the file name is exactly 'df.pkl' (case-sensitive)
-            3. Verify the file was committed and pushed to GitHub
-            """)
-            st.stop()
-            
-        with open("df.pkl", "rb") as f:
-            music = pickle.load(f)
-            
-        # Validate DataFrame structure
-        required_columns = ['song', 'artist']
-        missing_columns = [col for col in required_columns if col not in music.columns]
-        
-        if missing_columns:
-            st.error(f"Required columns missing from dataset: {missing_columns}")
-            st.stop()
-            
-        st.success(f"Loaded {len(music)} songs from dataset")
-        return music
-        
-    except Exception as e:
-        st.error(f"Error loading music dataset: {str(e)}")
-        st.info("Please check that df.pkl is a valid pickle file containing a pandas DataFrame")
+    """Load df.pkl from the repository and validate its structure."""
+    if not os.path.exists("df.pkl"):
+        st.error(
+            "`df.pkl` not found in your repository.\n\n"
+            "• Place the file in the repo root, **or**\n"
+            "• Host it externally and add a similar download function."
+        )
         st.stop()
+
+    try:
+        with open("df.pkl", "rb") as fh:
+            df = pickle.load(fh)
+    except Exception as exc:
+        st.error(f"Could not load df.pkl: {exc}")
+        st.stop()
+
+    # Minimal schema check
+    missing = [c for c in ("song", "artist") if c not in df.columns]
+    if missing:
+        st.error(f"Missing columns in DataFrame: {missing}")
+        st.stop()
+
+    return df
 
 @st.cache_data(show_spinner=False)
 def load_similarity_matrix():
-    """Load similarity matrix with error handling."""
+    """Download (if necessary) and load the similarity matrix."""
+    path = download_file_with_progress(SIMILARITY_FILE_ID, SIMILARITY_FILENAME)
     try:
-        sim_file = download_similarity_with_progress()
-        
-        with gzip.open(sim_file, "rb") as f:
-            similarity = pickle.load(f)
-            
-        st.success(f"Loaded similarity matrix: {similarity.shape}")
-        return similarity
-        
-    except Exception as e:
-        st.error(f"Error loading similarity matrix: {str(e)}")
-        st.info("Please check that the similarity file is a valid compressed pickle file")
+        with gzip.open(path, "rb") as fh:
+            sim = pickle.load(fh)
+        return sim
+    except Exception as exc:
+        st.error(f"Could not load similarity matrix: {exc}")
         st.stop()
 
-# --- RECOMMENDATION FUNCTIONS ---
-
-def get_song_album_cover_url(song_name, artist_name, sp):
-    """Get album cover URL from Spotify with error handling."""
-    search_query = f"track:{song_name} artist:{artist_name}"
+# ──────────────────────────────────────────────────────────────
+# RECOMMENDATION LOGIC
+# ──────────────────────────────────────────────────────────────
+def get_album_cover(song: str, artist: str, sp) -> str:
+    """Return album-cover URL from Spotify or a fallback image."""
     try:
-        results = sp.search(q=search_query, type="track", limit=1)
-        if results and results["tracks"]["items"]:
-            track = results["tracks"]["items"][0]
-            if track["album"]["images"]:
-                return track["album"]["images"][0]["url"]
-    except Exception as e:
-        # Silent fallback for individual songs
-        pass
-    
-    return FALLBACK_IMAGE
+        q = f"track:{song} artist:{artist}"
+        res = sp.search(q=q, type="track", limit=1)
+        images = res["tracks"]["items"][0]["album"]["images"]
+        return images[0]["url"] if images else FALLBACK_IMAGE
+    except Exception:
+        return FALLBACK_IMAGE
 
-def recommend(song, music, similarity, sp):
-    """Generate recommendations with comprehensive error handling."""
-    try:
-        # Find song index
-        song_matches = music[music['song'] == song]
-        if song_matches.empty:
-            st.error(f"Song '{song}' not found in the dataset.")
-            return [], []
-            
-        index = song_matches.index[0]
-        
-        # Get similarity scores
-        if index >= len(similarity):
-            st.error("Similarity data mismatch. Please regenerate the similarity matrix.")
-            return [], []
-            
-        distances = sorted(
-            list(enumerate(similarity[index])), 
-            reverse=True, 
-            key=lambda x: x[1]
-        )
-        
-        # Get recommendations
-        recommended_music_names = []
-        recommended_music_posters = []
-        
-        # Progress indicator for fetching album covers
-        progress_bar = st.progress(0)
-        status_text = st.empty()
-        
-        for i, (idx, score) in enumerate(distances[1:7]):  # Skip first (same song)
-            try:
-                artist = music.iloc[idx].artist
-                song_name = music.iloc[idx].song
-                
-                status_text.text(f"Fetching album cover {i+1}/6: {song_name}")
-                
-                album_cover = get_song_album_cover_url(song_name, artist, sp)
-                
-                recommended_music_names.append(song_name)
-                recommended_music_posters.append(album_cover)
-                
-                progress_bar.progress((i + 1) / 6)
-                
-            except Exception as e:
-                st.warning(f"Error processing recommendation {i+1}: {str(e)}")
-                continue
-        
-        # Clear progress indicators
-        progress_bar.empty()
-        status_text.empty()
-        
-        return recommended_music_names, recommended_music_posters
-        
-    except Exception as e:
-        st.error(f"Error generating recommendations: {str(e)}")
+def recommend(song: str, df, sim, sp):
+    """Return lists of recommended song titles and artwork URLs."""
+    if song not in df["song"].values:
         return [], []
 
-# --- MAIN APP ---
+    idx = df.index[df["song"] == song][0]
+    scores = list(enumerate(sim[idx]))
+    scores = sorted(scores, key=lambda x: x[1], reverse=True)[1:7]
 
+    titles, covers = [], []
+    prog = st.progress(0)
+    for i, (row_idx, _) in enumerate(scores):
+        row = df.iloc[row_idx]
+        titles.append(row.song)
+        covers.append(get_album_cover(row.song, row.artist, sp))
+        prog.progress((i + 1) / len(scores))
+    prog.empty()
+    return titles, covers
+
+# ──────────────────────────────────────────────────────────────
+# MAIN APP
+# ──────────────────────────────────────────────────────────────
 def main():
     st.set_page_config(
-        page_title="Music Recommendation System",
+        page_title="🎵 Music Recommendation System",
         page_icon="🎵",
         layout="wide",
         initial_sidebar_state="expanded"
     )
+
+    st.header("🎵 Music Recommendation System")
     
-    st.header('🎵 Music Recommendation System')
-    
-    # Initialize components with error handling
-    with st.spinner("Initializing Spotify client..."):
+    with st.spinner("Connecting to Spotify ..."):
         sp = get_spotify_client()
     
-    with st.spinner("Loading music dataset..."):
-        music = load_music_dataframe()
+    with st.spinner("Loading dataset ..."):
+        df = load_music_dataframe()
     
-    with st.spinner("Loading similarity matrix..."):
-        similarity = load_similarity_matrix()
-    
-    # Validate data consistency
-    if len(music) != similarity.shape[0]:
-        st.error(f"""
-        **Data mismatch detected!**
-        
-        - Music dataset: {len(music)} songs
-        - Similarity matrix: {similarity.shape[0]} songs
-        
-        Please ensure both files are from the same dataset.
-        """)
-        st.stop()
-    
-    # Main interface
-    st.markdown("---")
-    
-    col1, col2 = st.columns([2, 1])
-    
-    with col1:
-        music_list = music['song'].values
-        selected_song = st.selectbox(
-            "🎵 Type or select a song from the dropdown:",
-            music_list,
-            help="Start typing to search for songs"
-        )
-    
-    with col2:
-        st.metric("Total Songs", f"{len(music):,}")
-        st.metric("Unique Artists", f"{music['artist'].nunique():,}")
-    
-    # Show selected song info
-    if selected_song:
-        selected_info = music[music['song'] == selected_song].iloc[0]
-        st.info(f"🎤 **Selected:** {selected_song} by {selected_info['artist']}")
-    
-    # Recommendation button
-    if st.button('🚀 Show Recommendations', type="primary", use_container_width=True):
-        if selected_song:
-            with st.spinner("Generating recommendations..."):
-                recommended_names, recommended_posters = recommend(selected_song, music, similarity, sp)
-            
-            if recommended_names:
-                st.markdown("### 🎵 Recommended Songs:")
-                
-                # Display recommendations in columns
-                cols = st.columns(min(6, len(recommended_names)))
-                for idx, (name, poster) in enumerate(zip(recommended_names, recommended_posters)):
-                    with cols[idx % 6]:
-                        st.image(poster, use_column_width=True)
-                        st.markdown(f"**{name}**")
-                        
-                        # Get artist info
-                        try:
-                            artist_info = music[music['song'] == name]
-                            if not artist_info.empty:
-                                st.caption(f"by {artist_info.iloc[0]['artist']}")
-                        except:
-                            pass
-                            
-            else:
-                st.warning("No recommendations available. Please try another song.")
-        else:
-            st.warning("Please select a song first.")
-    
-    # Footer
-    st.markdown("---")
-    st.markdown("""
-    <div style='text-align: center; color: #666;'>
-        🎵 Music Recommendation System | Powered by Spotify API & Machine Learning
-    </div>
-    """, unsafe_allow_html=True)
+    with st.spinner("Loading similarity matrix ..."):
+        sim = load_similarity_matrix()
 
+    if len(df) != sim.shape[0]:
+        st.error(
+            f"Dataset/similarity size mismatch:\n"
+            f"• df.pkl rows    : {len(df)}\n"
+            f"• similarity rows: {sim.shape[0]}\n"
+            "Ensure both files come from the **same** preprocessing run."
+        )
+        st.stop()
+
+    st.markdown("---")
+
+    # Sidebar metrics
+    st.sidebar.metric("Total songs", f"{len(df):,}")
+    st.sidebar.metric("Unique artists", f"{df['artist'].nunique():,}")
+
+    # Main selector
+    selection = st.selectbox(
+        "🔍 Type or pick a song:",
+        df["song"].values,
+        help="Start typing to search"
+    )
+
+    if st.button("Show Recommendations", type="primary"):
+        if not selection:
+            st.warning("Pick a song first!")
+            st.stop()
+
+        with st.spinner("Generating recommendations ..."):
+            names, posters = recommend(selection, df, sim, sp)
+
+        if not names:
+            st.info("No recommendations found. Try another song.")
+        else:
+            st.markdown("### Recommended for you")
+            cols = st.columns(min(6, len(names)))
+            for col, title, cover in zip(cols, names, posters):
+                with col:
+                    st.image(cover, use_column_width=True)
+                    st.caption(title)
+
+    st.markdown("---")
+    st.write(
+        "<center style='color:#888'>Powered by Spotify API • Built with Streamlit</center>",
+        unsafe_allow_html=True
+    )
+
+# ──────────────────────────────────────────────────────────────
+# RUN
+# ──────────────────────────────────────────────────────────────
 if __name__ == "__main__":
     main()
