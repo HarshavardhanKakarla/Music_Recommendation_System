@@ -10,11 +10,11 @@ from spotipy.oauth2 import SpotifyClientCredentials
 # CONFIGURATION
 # ──────────────────────────────────────────────────────────────
 
-# Google Drive file ID for the compressed similarity matrix
+# Google Drive file ID for the similarity matrix
 SIMILARITY_FILE_ID = "1HtjpXIJC950AKuaDHZwTux54SU63CZGm"
 
-# Local filename after download
-SIMILARITY_FILENAME = "similarity.pkl.gz"
+# Local filename after download (change extension since it's not gzipped)
+SIMILARITY_FILENAME = "similarity.pkl"
 
 # Fallback album-cover image
 FALLBACK_IMAGE = "https://i.postimg.cc/0QNxYz4V/social.png"
@@ -56,7 +56,7 @@ def get_spotify_client():
         sp.search(q="test", type="track", limit=1)
         return sp
     except Exception as exc:
-        st.error(f"Could not connect to Spotify API: {exc}")
+        st.error(f"❌ Could not connect to Spotify API: {exc}")
         st.stop()
 
 # ──────────────────────────────────────────────────────────────
@@ -126,10 +126,24 @@ def load_music_dataframe():
 def load_similarity_matrix():
     """Download (if necessary) and load the similarity matrix."""
     path = download_file_with_progress(SIMILARITY_FILE_ID, SIMILARITY_FILENAME)
+    
+    # Try gzipped first, then regular pickle
     try:
         with gzip.open(path, "rb") as fh:
             sim = pickle.load(fh)
+        st.success("Loaded compressed similarity matrix")
         return sim
+    except gzip.BadGzipFile:
+        # File is not gzipped, try regular pickle
+        st.info("File is not compressed, loading as regular pickle...")
+        try:
+            with open(path, "rb") as fh:
+                sim = pickle.load(fh)
+            st.success("Loaded similarity matrix")
+            return sim
+        except Exception as exc:
+            st.error(f"Could not load similarity matrix as regular pickle: {exc}")
+            st.stop()
     except Exception as exc:
         st.error(f"Could not load similarity matrix: {exc}")
         st.stop()
@@ -143,7 +157,7 @@ def get_album_cover(song: str, artist: str, sp) -> str:
         q = f"track:{song} artist:{artist}"
         res = sp.search(q=q, type="track", limit=1)
         images = res["tracks"]["items"][0]["album"]["images"]
-        return images[0]["url"] if images else FALLBACK_IMAGE
+        return images["url"] if images else FALLBACK_IMAGE
     except Exception:
         return FALLBACK_IMAGE
 
@@ -192,7 +206,7 @@ def main():
         st.error(
             f"Dataset/similarity size mismatch:\n"
             f"• df.pkl rows    : {len(df)}\n"
-            f"• similarity rows: {sim.shape[0]}\n"
+            f"• similarity rows: {sim.shape}\n"
             "Ensure both files come from the **same** preprocessing run."
         )
         st.stop()
