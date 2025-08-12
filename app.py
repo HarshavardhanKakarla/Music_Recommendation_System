@@ -139,7 +139,7 @@ def load_similarity_matrix():
         try:
             with open(path, "rb") as fh:
                 sim = pickle.load(fh)
-            st.success("Loaded similarity matrix")
+            #st.success("Loaded similarity matrix")
             return sim
         except Exception as exc:
             st.error(f"Could not load similarity matrix as regular pickle: {exc}")
