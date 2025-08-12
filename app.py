@@ -103,7 +103,9 @@ def download_similarity_with_progress():
         time.sleep(1)
         progress_container.empty()
         status_container.empty()
-        
+      except ImportError:
+        st.error("❌ 'gdown' library not found. Please add 'gdown>=4.7.1' to requirements.txt")
+        st.stop()  
     
     return SIMILARITY_FILENAME
 
