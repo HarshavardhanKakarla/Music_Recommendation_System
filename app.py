@@ -13,7 +13,7 @@ from spotipy.oauth2 import SpotifyClientCredentials
 # Google Drive file ID for the similarity matrix
 SIMILARITY_FILE_ID = "1HtjpXIJC950AKuaDHZwTux54SU63CZGm"
 
-# Local filename after download (change extension since it's not gzipped)
+# Local filename after download
 SIMILARITY_FILENAME = "similarity.pkl"
 
 # Fallback album-cover image
@@ -37,7 +37,7 @@ def get_spotify_client():
     # Abort if still missing
     if not client_id or not client_secret:
         st.error(
-            "🚨 **Spotify API credentials not found!**\n\n"
+            "**Spotify API credentials not found!**\n\n"
             "Add them in **Advanced settings → Secrets** when you deploy,\n"
             "or set the environment variables `SPOTIFY_CLIENT_ID` and "
             "`SPOTIFY_CLIENT_SECRET` when running locally.\n\n"
@@ -56,7 +56,7 @@ def get_spotify_client():
         sp.search(q="test", type="track", limit=1)
         return sp
     except Exception as exc:
-        st.error(f"❌ Could not connect to Spotify API: {exc}")
+        st.error(f"Could not connect to Spotify API: {exc}")
         st.stop()
 
 # ──────────────────────────────────────────────────────────────
@@ -127,19 +127,16 @@ def load_similarity_matrix():
     """Download (if necessary) and load the similarity matrix."""
     path = download_file_with_progress(SIMILARITY_FILE_ID, SIMILARITY_FILENAME)
     
-    # Try gzipped first, then regular pickle
+    # Try gzipped first, then regular pickle (silent operation)
     try:
         with gzip.open(path, "rb") as fh:
             sim = pickle.load(fh)
-        st.success("Loaded compressed similarity matrix")
         return sim
     except gzip.BadGzipFile:
-        # File is not gzipped, try regular pickle
-        st.info("File is not compressed, loading as regular pickle...")
+        # File is not gzipped, load as regular pickle (no info message)
         try:
             with open(path, "rb") as fh:
                 sim = pickle.load(fh)
-            #st.success("Loaded similarity matrix")
             return sim
         except Exception as exc:
             st.error(f"Could not load similarity matrix as regular pickle: {exc}")
@@ -157,41 +154,51 @@ def get_album_cover(song: str, artist: str, sp) -> str:
         q = f"track:{song} artist:{artist}"
         res = sp.search(q=q, type="track", limit=1)
         images = res["tracks"]["items"][0]["album"]["images"]
-        return images["url"] if images else FALLBACK_IMAGE
+        return images[0]["url"] if images else FALLBACK_IMAGE
     except Exception:
         return FALLBACK_IMAGE
 
 def recommend(song: str, df, sim, sp):
-    """Return lists of recommended song titles and artwork URLs."""
+    """Return lists of recommended song titles, artists, and artwork URLs."""
     if song not in df["song"].values:
-        return [], []
+        return [], [], []
 
     idx = df.index[df["song"] == song][0]
     scores = list(enumerate(sim[idx]))
     scores = sorted(scores, key=lambda x: x[1], reverse=True)[1:7]
 
-    titles, covers = [], []
+    titles, artists, covers = [], [], []
     prog = st.progress(0)
+    status_text = st.empty()
+    
     for i, (row_idx, _) in enumerate(scores):
         row = df.iloc[row_idx]
-        titles.append(row.song)
-        covers.append(get_album_cover(row.song, row.artist, sp))
+        song_title = row.song
+        artist_name = row.artist
+        
+        status_text.text(f"Fetching album cover {i+1}/6: {song_title}")
+        
+        titles.append(song_title)
+        artists.append(artist_name)
+        covers.append(get_album_cover(song_title, artist_name, sp))
         prog.progress((i + 1) / len(scores))
+    
     prog.empty()
-    return titles, covers
+    status_text.empty()
+    return titles, artists, covers
 
 # ──────────────────────────────────────────────────────────────
 # MAIN APP
 # ──────────────────────────────────────────────────────────────
 def main():
     st.set_page_config(
-        page_title="🎵 Music Recommendation System",
+        page_title="Music Recommendation System",
         page_icon="🎵",
         layout="wide",
         initial_sidebar_state="expanded"
     )
 
-    st.header("🎵 Music Recommendation System")
+    st.header("Music Recommendation System")
     
     with st.spinner("Connecting to Spotify ..."):
         sp = get_spotify_client()
@@ -206,7 +213,7 @@ def main():
         st.error(
             f"Dataset/similarity size mismatch:\n"
             f"• df.pkl rows    : {len(df)}\n"
-            f"• similarity rows: {sim.shape}\n"
+            f"• similarity rows: {sim.shape[0]}\n"
             "Ensure both files come from the **same** preprocessing run."
         )
         st.stop()
@@ -219,10 +226,15 @@ def main():
 
     # Main selector
     selection = st.selectbox(
-        "🔍 Type or pick a song:",
+        "Type or pick a song:",
         df["song"].values,
         help="Start typing to search"
     )
+    
+    # Show selected song info
+    if selection:
+        selected_info = df[df['song'] == selection].iloc[0]
+        st.info(f"**Selected:** {selection} by {selected_info['artist']}")
 
     if st.button("Show Recommendations", type="primary"):
         if not selection:
@@ -230,17 +242,18 @@ def main():
             st.stop()
 
         with st.spinner("Generating recommendations ..."):
-            names, posters = recommend(selection, df, sim, sp)
+            song_names, artists, posters = recommend(selection, df, sim, sp)
 
-        if not names:
+        if not song_names:
             st.info("No recommendations found. Try another song.")
         else:
             st.markdown("### Recommended for you")
-            cols = st.columns(min(6, len(names)))
-            for col, title, cover in zip(cols, names, posters):
+            cols = st.columns(min(6, len(song_names)))
+            for col, song_name, artist, cover in zip(cols, song_names, artists, posters):
                 with col:
-                    st.image(cover, use_column_width=True)
-                    st.caption(title)
+                    st.image(cover, use_container_width=True)  # Fixed deprecated parameter
+                    st.markdown(f"**{song_name}**")
+                    st.caption(f"by {artist}")
 
     st.markdown("---")
     st.write(
